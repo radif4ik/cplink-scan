@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Скан билета — ЦП ЛИНК</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #0e1621; color: #fff;
+    font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+  }
+  #wrap { display: flex; flex-direction: column; height: 100%; }
+  #title { padding: 14px 16px 4px; font-size: 17px; font-weight: 600; text-align: center; }
+  #hint  { padding: 0 16px 10px; font-size: 13px; color: #9bb0c3; text-align: center; }
+  #reader { flex: 1 1 auto; width: 100%; overflow: hidden; }
+  #reader video { width: 100% !important; height: 100% !important; object-fit: cover; }
+  #status { padding: 10px 16px; font-size: 14px; text-align: center; min-height: 20px; color: #7fd1a3; }
+  #bar { padding: 10px 16px calc(14px + env(safe-area-inset-bottom)); display: flex; gap: 10px; }
+  button {
+    flex: 1; padding: 14px; border: 0; border-radius: 12px; font-size: 16px; font-weight: 600;
+    color: #fff; background: #2b5278;
+  }
+  button.secondary { background: #243447; }
+  #manual { width: 100%; padding: 13px; border-radius: 12px; border: 1px solid #2b3b4d;
+    background: #16222e; color: #fff; font-size: 16px; text-align: center; }
+  #manualWrap { padding: 0 16px 6px; display: none; gap: 10px; flex-direction: column; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="title">📷 Скан билета</div>
+  <div id="hint">Наведи камеру на штрихкод билета</div>
+  <div id="reader"></div>
+  <div id="status">Запуск камеры…</div>
+  <div id="manualWrap">
+    <input id="manual" inputmode="numeric" placeholder="или введи номер заказа" />
+  </div>
+  <div id="bar">
+    <button class="secondary" id="manualBtn">Ввести вручную</button>
+    <button id="closeBtn">Закрыть</button>
+  </div>
+</div>
+
+<script>
+  var tg = window.Telegram ? window.Telegram.WebApp : null;
+  if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} }
+
+  var statusEl = document.getElementById("status");
+  var fmts = (window.Html5QrcodeSupportedFormats) ? [
+    Html5QrcodeSupportedFormats.EAN_13,
+    Html5QrcodeSupportedFormats.EAN_8,
+    Html5QrcodeSupportedFormats.UPC_A,
+    Html5QrcodeSupportedFormats.UPC_E,
+    Html5QrcodeSupportedFormats.CODE_128,
+    Html5QrcodeSupportedFormats.CODE_39,
+    Html5QrcodeSupportedFormats.QR_CODE
+  ] : undefined;
+
+  var scanner = new Html5Qrcode("reader", { formatsToSupport: fmts, verbose: false });
+  var done = false;
+
+  function finish(code) {
+    if (done) return;
+    done = true;
+    statusEl.textContent = "✅ Распознано: " + code;
+    try { scanner.stop().catch(function(){}); } catch (e) {}
+    if (tg && tg.sendData) { tg.sendData(String(code)); }
+    setTimeout(function () { if (tg && tg.close) tg.close(); }, 250);
+  }
+
+  function onScan(decodedText) {
+    var digits = (decodedText || "").replace(/\D/g, "");
+    if (digits.length >= 4) finish(digits);
+  }
+
+  var config = { fps: 12, qrbox: function (w, h) {
+    var side = Math.min(w, h);
+    return { width: Math.round(Math.min(w * 0.92, 360)), height: Math.round(side * 0.45) };
+  }, aspectRatio: 1.0 };
+
+  scanner.start({ facingMode: "environment" }, config, onScan, function () {})
+    .then(function () { statusEl.textContent = "Наведи на штрихкод…"; })
+    .catch(function (err) {
+      statusEl.textContent = "Камера недоступна. Введи номер вручную.";
+      document.getElementById("manualWrap").style.display = "flex";
+    });
+
+  document.getElementById("closeBtn").onclick = function () {
+    try { scanner.stop().catch(function(){}); } catch (e) {}
+    if (tg && tg.close) tg.close();
+  };
+  document.getElementById("manualBtn").onclick = function () {
+    document.getElementById("manualWrap").style.display = "flex";
+    document.getElementById("manual").focus();
+  };
+  document.getElementById("manual").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      var v = this.value.replace(/\D/g, "");
+      if (v.length >= 4) finish(v);
+    }
+  });
+</script>
+</body>
+</html>
