@@ -1,6 +1,6 @@
 FROM node:24-alpine
 WORKDIR /app
-COPY --chown=node:node server.mjs cabinet-worker.mjs ./
+COPY --chown=node:node server.mjs cabinet-worker.mjs bridge.mjs ./
 USER node
 ENV NODE_ENV=production PORT=8080
 EXPOSE 8080
