@@ -8,7 +8,7 @@ export function createBridge(signingKey,{timeoutMs=30000,maxPending=30,pollMs=15
     const supplied=Buffer.from(value||'');const expected=Buffer.from('Bearer '+token);
     return supplied.length===expected.length&&timingSafeEqual(supplied,expected);
   }
-  function validPath(path) {return /^(ping|employees|employees\/\d+\/(skills|attestations))$/.test(path)}
+  function validPath(path) {return /^(ping|employees|employees\/\d+\/(skills|attestations)|cabinet\/(identity|score|orders|order))$/.test(path)}
   async function source(url) {
     if(url.origin!=='https://productionwages.axiomalink.ru'||!url.pathname.startsWith('/api/v1/'))throw Error('Invalid bridge source');
     const path=url.pathname.slice('/api/v1/'.length);
@@ -29,7 +29,7 @@ export function createBridge(signingKey,{timeoutMs=30000,maxPending=30,pollMs=15
   }
   function complete(value) {
     const job=pending.get(value?.id);
-    if(!job||!job.sent||![200,503].includes(value.status)||!value.data||typeof value.data!=='object'||Array.isArray(value.data))return false;
+    if(!job||!job.sent||![200,403,503].includes(value.status)||!value.data||typeof value.data!=='object'||Array.isArray(value.data))return false;
     job.resolve({status:value.status,data:value.data});pending.delete(job.id);return true;
   }
   return {authorized,source,poll,complete};
