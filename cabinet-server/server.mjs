@@ -1,5 +1,6 @@
 import http from 'node:http';
 import worker from './cabinet-worker.mjs';
+import {createBridge} from './bridge.mjs';
 
 const port=Number(process.env.PORT||8080);
 if(!Number.isInteger(port)||port<1024||port>65535)throw Error('Invalid port');
@@ -10,12 +11,25 @@ const origins=(process.env.PUBLIC_ORIGINS||'').split(',').filter(Boolean).map(va
 });
 if(!origins.length)throw Error('Set PUBLIC_ORIGINS before starting the cabinet');
 const env=Object.fromEntries(['PRODUCTION_API_KEY','TG_WEBAPP_SECRET','CABINET_SIGNING_KEY'].map(key=>{
-  const value=process.env[key];if(!value)throw Error('Missing '+key);return [key,value];
+  const value=process.env[key];if(!value&&!(key==='PRODUCTION_API_KEY'&&process.env.PRODUCTION_SOURCE==='local-bridge'))throw Error('Missing '+key);return [key,value];
 }));
 for(const key of ['TG_WEBAPP_SECRET','CABINET_SIGNING_KEY'])if(!/^[a-f0-9]{64}$/i.test(env[key]))throw Error('Invalid '+key);
 const allowed=new Set(['/','/health','/ready','/api/cabinet','/api/history']);
+const bridge=process.env.PRODUCTION_SOURCE==='local-bridge'?createBridge(env.CABINET_SIGNING_KEY):null;
+if(bridge)env.PRODUCTION_FETCH=bridge.source;
 const server=http.createServer(async(req,res)=>{
   try{
+    if(req.url==='/internal/bridge/poll'||req.url==='/internal/bridge/result'){
+      res.setHeader('Cache-Control','no-store');
+      if(!bridge||req.method!=='POST'||!bridge.authorized(req.headers.authorization)){res.writeHead(401);res.end();return}
+      let size=0;const chunks=[];
+      for await(const chunk of req){size+=chunk.length;if(size>2000000){res.writeHead(413);res.end();return}chunks.push(chunk)}
+      const value=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if(req.url==='/internal/bridge/poll'){
+        const jobs=await bridge.poll();res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({jobs}));return;
+      }
+      const accepted=bridge.complete(value);res.writeHead(accepted?200:409);res.end();return;
+    }
     const origin=req.headers.origin;
     const host=req.headers.host;
     const base=origins.find(x=>new URL(x).host===host)||origins[0];
