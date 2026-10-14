@@ -2,3 +2,4 @@
 !Dockerfile
 !server.mjs
 !cabinet-worker.mjs
+!bridge.mjs
