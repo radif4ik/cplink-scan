@@ -3,3 +3,4 @@
 !server.mjs
 !cabinet-worker.mjs
 !bridge.mjs
+!browser-auth.mjs
