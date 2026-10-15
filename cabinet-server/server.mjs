@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {randomBytes} from 'node:crypto';
 import worker from './cabinet-worker.mjs';
 import {createBridge} from './bridge.mjs';
 import {createBrowserAuth} from './browser-auth.mjs';
@@ -15,20 +16,32 @@ const env=Object.fromEntries(['PRODUCTION_API_KEY','TG_WEBAPP_SECRET','CABINET_S
   const value=process.env[key];if(!value&&!(key==='PRODUCTION_API_KEY'&&process.env.PRODUCTION_SOURCE==='local-bridge'))throw Error('Missing '+key);return [key,value];
 }));
 for(const key of ['TG_WEBAPP_SECRET','CABINET_SIGNING_KEY'])if(!/^[a-f0-9]{64}$/i.test(env[key]))throw Error('Invalid '+key);
-const allowed=new Set(['/','/health','/ready','/api/weather','/api/cabinet','/api/history','/api/score','/api/score/calendar','/api/orders','/api/order','/api/session','/api/login','/api/logout','/auth/callback','/api/notifications','/api/notifications/read','/api/scan','/api/operation/prepare','/api/operation/confirm','/api/operation/status','/api/workbench','/api/activity','/api/payroll','/api/requests','/api/requests/create','/api/requests/review','/api/requests/photo']);
+const allowed=new Set(['/','/health','/ready','/api/weather','/api/cabinet','/api/history','/api/score','/api/score/calendar','/api/orders','/api/order','/api/session','/api/login','/api/logout','/auth/callback','/api/notifications','/api/notifications/read','/api/scan','/api/operation/prepare','/api/operation/confirm','/api/operation/status','/api/workbench','/api/activity','/api/payroll','/api/requests','/api/requests/create','/api/requests/review','/api/requests/photo','/api/login/start','/api/login/status']);
 for(const p of ["/api/hub", "/api/hub/create", "/api/hub/react", "/api/hub/review", "/api/hub/photo", "/api/hub/settings", "/api/hub/shift", "/api/push/info", "/api/push/save", "/api/push/remove"])allowed.add(p);
 for(const p of ['/sw.js','/manifest.webmanifest','/offline.html','/icon-192.png','/icon-512.png'])allowed.add(p);
 const bridge=process.env.PRODUCTION_SOURCE==='local-bridge'?createBridge(env.CABINET_SIGNING_KEY):null;
 if(bridge)env.PRODUCTION_FETCH=bridge.source;
 const browserAuth=createBrowserAuth(env.CABINET_SIGNING_KEY,process.env.TG_LOGIN_SECRET,process.env.TG_LOGIN_BOT_USERNAME||'postprocess_bot');
+// Вход через приложение Telegram: виджет живёт на oauth.telegram.org, а с
+// мобильного интернета этот домен молча недоступен. Код живёт 5 минут, привязан
+// к nonce входного cookie браузера и подтверждается ботом через ключ моста.
+const LOGIN_CODE=/^[a-f0-9]{32}$/,pendingLogins=new Map();
+function sweepLogins(){const t=Date.now();for(const[k,v]of pendingLogins)if(v.exp<t)pendingLogins.delete(k)}
 const server=http.createServer(async(req,res)=>{
   try{
-    if(req.url==='/internal/bridge/poll'||req.url==='/internal/bridge/result'){
+    if(req.url==='/internal/bridge/poll'||req.url==='/internal/bridge/result'||req.url==='/internal/bridge/login'){
       res.setHeader('Cache-Control','no-store');
       if(!bridge||req.method!=='POST'||!bridge.authorized(req.headers.authorization)){res.writeHead(401);res.end();return}
       let size=0;const chunks=[];
       for await(const chunk of req){size+=chunk.length;if(size>2000000){res.writeHead(413);res.end();return}chunks.push(chunk)}
       const value=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if(req.url==='/internal/bridge/login'){
+        sweepLogins();
+        const code=String(value?.code||''),uid=Number(value?.telegram_id),login=pendingLogins.get(code);
+        // Один код — одно подтверждение: повторное нажатие не перепривязывает вход.
+        if(!LOGIN_CODE.test(code)||!Number.isSafeInteger(uid)||uid<=0||!login||login.uid){res.writeHead(409);res.end();return}
+        login.uid=uid;res.writeHead(200);res.end();return;
+      }
       if(req.url==='/internal/bridge/poll'){
         const jobs=await bridge.poll();res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({jobs}));return;
       }
@@ -47,6 +60,9 @@ const server=http.createServer(async(req,res)=>{
       if(!browserAuth.accepts(req.headers.cookie,csrf)){answer({error:'Обновите страницу входа'},403);return}
       const uid=browserAuth.verify(user);
       if(!uid){answer({error:'Не удалось проверить вход через Telegram'},401);return}
+      await finishLogin(uid,redirect);
+    }
+    async function finishLogin(uid,redirect=false){
       const source=new URL('https://productionwages.axiomalink.ru/api/v1/cabinet/identity');source.searchParams.set('telegram_id',String(uid));
       const r=await bridge.source(source);const identity=await r.json();
       if(r.status===403){answer({error:identity.error||'Аккаунт не привязан к сотруднику'},403);return}
@@ -63,12 +79,33 @@ const server=http.createServer(async(req,res)=>{
       await completeLogin(user,url.searchParams.get('state'),true);return;
     }
     if(url.pathname==='/api/session'&&req.method==='GET'){
-      const flow=browserAuth.challenge();answer({authenticated:!!session,login_enabled:browserAuth.enabled,bot:browserAuth.bot,csrf:flow.csrf},200,[flow.cookie]);return;
+      const flow=browserAuth.challenge(req.headers.cookie);answer({authenticated:!!session,login_enabled:browserAuth.enabled,app_login:!!bridge,bot:browserAuth.bot,csrf:flow.csrf},200,flow.cookie?[flow.cookie]:undefined);return;
     }
     if(req.method==='HEAD'&&url.pathname==='/health'){res.writeHead(200,{'Cache-Control':'no-store'});res.end();return}
     let size=0;const chunks=[];
     for await(const chunk of req){size+=chunk.length;if(size>(['/api/requests/create','/api/hub/create'].includes(url.pathname)?240000:20000)){res.writeHead(413);res.end();return}chunks.push(chunk)}
     const body=Buffer.concat(chunks).toString('utf8');
+    if(url.pathname==='/api/login/start'||url.pathname==='/api/login/status'){
+      if(req.method!=='POST'||origin!==url.origin){answer({error:'Запрос отклонён'},403);return}
+      if(!bridge){answer({error:'Вход ещё настраивается'},503);return}
+      const value=JSON.parse(body||'{}');
+      sweepLogins();
+      if(url.pathname==='/api/login/start'){
+        const nonce=browserAuth.flowNonce(req.headers.cookie);
+        if(!nonce||!browserAuth.accepts(req.headers.cookie,value.csrf)){answer({error:'Обновите страницу входа'},403);return}
+        if(pendingLogins.size>=500){answer({error:'Слишком много попыток входа. Повторите через минуту'},429);return}
+        const code=randomBytes(16).toString('hex');
+        pendingLogins.set(code,{nonce,uid:0,exp:Date.now()+300000});
+        answer({code,bot:browserAuth.bot});return;
+      }
+      const code=String(value.code||''),login=pendingLogins.get(code);
+      if(!LOGIN_CODE.test(code)||!login){answer({error:'Ссылка входа устарела. Начните вход заново'},410);return}
+      // Статус отдаётся только браузеру, начавшему вход: чужой код не открывает сессию.
+      if(browserAuth.flowNonce(req.headers.cookie)!==login.nonce){answer({error:'Обновите страницу входа'},403);return}
+      if(!login.uid){answer({pending:true});return}
+      pendingLogins.delete(code);
+      await finishLogin(login.uid);return;
+    }
     if(url.pathname==='/api/login'||url.pathname==='/api/logout'){
       if(req.method!=='POST'||origin!==url.origin){answer({error:'Запрос отклонён'},403);return}
       if(url.pathname==='/api/logout'){answer({ok:true},200,browserAuth.logout());return}

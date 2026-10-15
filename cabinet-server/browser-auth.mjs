@@ -19,10 +19,14 @@ export function createBrowserAuth(signingKey,loginKey,bot='postprocess_bot') {
   function cookies(header){return Object.fromEntries((header||'').split(';').map(x=>x.trim().split('='))) }
   function cookie(name,value,age){return name+'='+value+'; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age='+age}
   function session(header){const d=open('session',cookies(header)[SESSION]);return d&&Number.isSafeInteger(d.uid)&&d.uid>0&&/^\d+$/.test(String(d.employee_id))?d:null}
-  function challenge(){const d={nonce:randomBytes(32).toString('hex'),iat:now(),exp:now()+300};return {csrf:d.nonce,cookie:cookie(FLOW,seal('flow',d),300)}}
+  // Живой входной cookie не перевыпускается: сотрудник уходит подтверждать вход
+  // в приложение Telegram, страница может перезагрузиться, а код входа привязан
+  // к этому nonce. Новый выдаётся, когда у старого осталось меньше минуты.
+  function challenge(header){const old=open('flow',cookies(header)[FLOW]);if(old&&old.exp-now()>60)return {csrf:old.nonce,cookie:null};const d={nonce:randomBytes(32).toString('hex'),iat:now(),exp:now()+300};return {csrf:d.nonce,cookie:cookie(FLOW,seal('flow',d),300)}}
+  function flowNonce(header){const d=open('flow',cookies(header)[FLOW]);return d?d.nonce:null}
   function accepts(header,csrf){const d=open('flow',cookies(header)[FLOW]);return !!d&&equal(d.nonce,csrf)}
   function login(uid,employeeId){const d={uid,employee_id:Number(employeeId),iat:now(),exp:now()+3600};return [cookie(SESSION,seal('session',d),3600),cookie(FLOW,'',0)]}
   const enabled=/^[a-f0-9]{64}$/i.test(loginKey||'')&&/^[a-zA-Z0-9_]{5,32}$/.test(bot);
-  return {session,challenge,accepts,login,verify:data=>verifyLogin(data,loginKey),enabled,bot,
+  return {session,challenge,flowNonce,accepts,login,verify:data=>verifyLogin(data,loginKey),enabled,bot,
     logout:()=>[cookie(SESSION,'',0),cookie(FLOW,'',0)]};
 }
