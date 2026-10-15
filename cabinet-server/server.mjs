@@ -15,7 +15,7 @@ const env=Object.fromEntries(['PRODUCTION_API_KEY','TG_WEBAPP_SECRET','CABINET_S
   const value=process.env[key];if(!value&&!(key==='PRODUCTION_API_KEY'&&process.env.PRODUCTION_SOURCE==='local-bridge'))throw Error('Missing '+key);return [key,value];
 }));
 for(const key of ['TG_WEBAPP_SECRET','CABINET_SIGNING_KEY'])if(!/^[a-f0-9]{64}$/i.test(env[key]))throw Error('Invalid '+key);
-const allowed=new Set(['/','/health','/ready','/api/cabinet','/api/history','/api/score','/api/orders','/api/order','/api/session','/api/login','/api/logout','/auth/callback','/api/notifications','/api/notifications/read','/api/scan','/api/operation/prepare','/api/operation/confirm','/api/operation/status']);
+const allowed=new Set(['/','/health','/ready','/api/cabinet','/api/history','/api/score','/api/orders','/api/order','/api/session','/api/login','/api/logout','/auth/callback','/api/notifications','/api/notifications/read','/api/scan','/api/operation/prepare','/api/operation/confirm','/api/operation/status','/api/activity','/api/payroll','/api/requests','/api/requests/create','/api/requests/review','/api/requests/photo']);
 const bridge=process.env.PRODUCTION_SOURCE==='local-bridge'?createBridge(env.CABINET_SIGNING_KEY):null;
 if(bridge)env.PRODUCTION_FETCH=bridge.source;
 const browserAuth=createBrowserAuth(env.CABINET_SIGNING_KEY,process.env.TG_LOGIN_SECRET,process.env.TG_LOGIN_BOT_USERNAME||'postprocess_bot');
@@ -65,7 +65,7 @@ const server=http.createServer(async(req,res)=>{
     }
     if(req.method==='HEAD'&&url.pathname==='/health'){res.writeHead(200,{'Cache-Control':'no-store'});res.end();return}
     let size=0;const chunks=[];
-    for await(const chunk of req){size+=chunk.length;if(size>20000){res.writeHead(413);res.end();return}chunks.push(chunk)}
+    for await(const chunk of req){size+=chunk.length;if(size>(url.pathname==='/api/requests/create'?240000:20000)){res.writeHead(413);res.end();return}chunks.push(chunk)}
     const body=Buffer.concat(chunks).toString('utf8');
     if(url.pathname==='/api/login'||url.pathname==='/api/logout'){
       if(req.method!=='POST'||origin!==url.origin){answer({error:'Запрос отклонён'},403);return}
