@@ -8,7 +8,7 @@ export function createBridge(signingKey,{timeoutMs=30000,maxPending=30,pollMs=15
     const supplied=Buffer.from(value||'');const expected=Buffer.from('Bearer '+token);
     return supplied.length===expected.length&&timingSafeEqual(supplied,expected);
   }
-  function validPath(path) {return /^(ping|employees|employees\/\d+\/(skills|attestations)|cabinet\/(identity|score|orders|order|notifications|read-notifications|scan|prepare|confirm|status|workbench|activity|payroll|requests|request-create|request-review|request-photo))$/.test(path)}
+  function validPath(path) {return /^(ping|employees|employees\/\d+\/(skills|attestations)|cabinet\/(identity|score|orders|order|notifications|read-notifications|scan|prepare|confirm|status|workbench|activity|score-calendar|payroll|requests|request-create|request-review|request-photo))$/.test(path)}
   async function source(url) {
     if(url.origin!=='https://productionwages.axiomalink.ru'||!url.pathname.startsWith('/api/v1/'))throw Error('Invalid bridge source');
     const path=url.pathname.slice('/api/v1/'.length);
