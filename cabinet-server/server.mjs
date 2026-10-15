@@ -15,7 +15,7 @@ const env=Object.fromEntries(['PRODUCTION_API_KEY','TG_WEBAPP_SECRET','CABINET_S
   const value=process.env[key];if(!value&&!(key==='PRODUCTION_API_KEY'&&process.env.PRODUCTION_SOURCE==='local-bridge'))throw Error('Missing '+key);return [key,value];
 }));
 for(const key of ['TG_WEBAPP_SECRET','CABINET_SIGNING_KEY'])if(!/^[a-f0-9]{64}$/i.test(env[key]))throw Error('Invalid '+key);
-const allowed=new Set(['/','/health','/ready','/api/cabinet','/api/history','/api/score','/api/orders','/api/order','/api/session','/api/login','/api/logout']);
+const allowed=new Set(['/','/health','/ready','/api/cabinet','/api/history','/api/score','/api/orders','/api/order','/api/session','/api/login','/api/logout','/auth/callback']);
 const bridge=process.env.PRODUCTION_SOURCE==='local-bridge'?createBridge(env.CABINET_SIGNING_KEY):null;
 if(bridge)env.PRODUCTION_FETCH=bridge.source;
 const browserAuth=createBrowserAuth(env.CABINET_SIGNING_KEY,process.env.TG_LOGIN_SECRET,process.env.TG_LOGIN_BOT_USERNAME||'postprocess_bot');
@@ -39,7 +39,27 @@ const server=http.createServer(async(req,res)=>{
     const url=new URL(req.url,origin||base);
     if(!origins.includes(url.origin)||!allowed.has(url.pathname)){res.writeHead(404);res.end();return}
     const session=browserAuth.session(req.headers.cookie);
-    function answer(data,status=200,cookies){res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store, private',...(cookies?{'Set-Cookie':cookies}:{})});res.end(JSON.stringify(data))}
+    function answer(data,status=200,cookies){res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store, private','Referrer-Policy':'no-referrer',...(cookies?{'Set-Cookie':cookies}:{})});res.end(JSON.stringify(data))}
+    async function completeLogin(user,csrf,redirect=false){
+      if(!browserAuth.enabled||!bridge){answer({error:'Вход через браузер ещё настраивается'},503);return}
+      if(!browserAuth.accepts(req.headers.cookie,csrf)){answer({error:'Обновите страницу входа'},403);return}
+      const uid=browserAuth.verify(user);
+      if(!uid){answer({error:'Не удалось проверить вход через Telegram'},401);return}
+      const source=new URL('https://productionwages.axiomalink.ru/api/v1/cabinet/identity');source.searchParams.set('telegram_id',String(uid));
+      const r=await bridge.source(source);const identity=await r.json();
+      if(r.status===403){answer({error:identity.error||'Аккаунт не привязан к сотруднику'},403);return}
+      if(!r.ok||identity.source!=='employee-cabinet-local'||identity.telegram_id!==uid||!Number.isSafeInteger(identity.employee_id)||identity.employee_id<=0){answer({error:'Не удалось получить регистрацию сотрудника'},503);return}
+      const cookies=browserAuth.login(uid,identity.employee_id);
+      if(redirect){res.writeHead(303,{Location:'/','Set-Cookie':cookies,'Cache-Control':'no-store, private','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});res.end();return}
+      answer({ok:true},200,cookies);
+    }
+    if(url.pathname==='/auth/callback'){
+      if(req.method!=='GET'){answer({error:'Метод не поддерживается'},405);return}
+      const entries=[...url.searchParams];
+      if(req.url.length>16000||new Set(entries.map(([k])=>k)).size!==entries.length){answer({error:'Неверный ответ Telegram'},400);return}
+      const user=Object.fromEntries(entries.filter(([k])=>k!=='state'));
+      await completeLogin(user,url.searchParams.get('state'),true);return;
+    }
     if(url.pathname==='/api/session'&&req.method==='GET'){
       const flow=browserAuth.challenge();answer({authenticated:!!session,login_enabled:browserAuth.enabled,bot:browserAuth.bot,csrf:flow.csrf},200,[flow.cookie]);return;
     }
@@ -51,15 +71,7 @@ const server=http.createServer(async(req,res)=>{
       if(req.method!=='POST'||origin!==url.origin){answer({error:'Запрос отклонён'},403);return}
       if(url.pathname==='/api/logout'){answer({ok:true},200,browserAuth.logout());return}
       const value=JSON.parse(body);
-      if(!browserAuth.enabled||!bridge){answer({error:'Вход через браузер ещё настраивается'},503);return}
-      if(!browserAuth.accepts(req.headers.cookie,value.csrf)){answer({error:'Обновите страницу входа'},403);return}
-      const uid=browserAuth.verify(value.user);
-      if(!uid){answer({error:'Не удалось проверить вход через Telegram'},401);return}
-      const source=new URL('https://productionwages.axiomalink.ru/api/v1/cabinet/identity');source.searchParams.set('telegram_id',String(uid));
-      const r=await bridge.source(source);const identity=await r.json();
-      if(r.status===403){answer({error:identity.error||'Аккаунт не привязан к сотруднику'},403);return}
-      if(!r.ok||identity.source!=='employee-cabinet-local'||identity.telegram_id!==uid||!Number.isSafeInteger(identity.employee_id)||identity.employee_id<=0){answer({error:'Не удалось получить регистрацию сотрудника'},503);return}
-      answer({ok:true},200,browserAuth.login(uid,identity.employee_id));return;
+      await completeLogin(value.user,value.csrf);return;
     }
     const requestEnv={...env};
     if(session&&req.method==='POST'){
