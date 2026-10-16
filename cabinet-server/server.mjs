@@ -16,8 +16,9 @@ const env=Object.fromEntries(['PRODUCTION_API_KEY','TG_WEBAPP_SECRET','CABINET_S
   const value=process.env[key];if(!value&&!(key==='PRODUCTION_API_KEY'&&process.env.PRODUCTION_SOURCE==='local-bridge'))throw Error('Missing '+key);return [key,value];
 }));
 for(const key of ['TG_WEBAPP_SECRET','CABINET_SIGNING_KEY'])if(!/^[a-f0-9]{64}$/i.test(env[key]))throw Error('Invalid '+key);
-const allowed=new Set(['/','/health','/ready','/api/weather','/api/cabinet','/api/history','/api/score','/api/score/calendar','/api/orders','/api/order','/api/session','/api/login','/api/logout','/auth/callback','/api/notifications','/api/notifications/read','/api/scan','/api/operation/prepare','/api/operation/confirm','/api/operation/status','/api/workbench','/api/activity','/api/payroll','/api/requests','/api/requests/create','/api/requests/review','/api/requests/photo','/api/login/start','/api/login/status']);
+const allowed=new Set(['/','/health','/ready','/api/weather','/api/cabinet','/api/history','/api/score','/api/score/calendar','/api/orders','/api/order','/api/session','/api/login','/api/logout','/auth/start','/auth/callback','/api/notifications','/api/notifications/read','/api/scan','/api/operation/prepare','/api/operation/confirm','/api/operation/status','/api/workbench','/api/activity','/api/payroll','/api/requests','/api/requests/create','/api/requests/review','/api/requests/photo','/api/login/start','/api/login/status']);
 for(const p of ["/api/hub", "/api/hub/create", "/api/hub/react", "/api/hub/review", "/api/hub/photo", "/api/hub/settings", "/api/hub/shift", "/api/push/info", "/api/push/save", "/api/push/remove"])allowed.add(p);
+for(const p of ['/api/password/login','/api/password/activate','/api/access/list','/api/access/issue'])allowed.add(p);
 for(const p of ['/sw.js','/manifest.webmanifest','/offline.html','/icon-192.png','/icon-512.png'])allowed.add(p);
 const bridge=process.env.PRODUCTION_SOURCE==='local-bridge'?createBridge(env.CABINET_SIGNING_KEY):null;
 if(bridge)env.PRODUCTION_FETCH=bridge.source;
@@ -27,6 +28,7 @@ const browserAuth=createBrowserAuth(env.CABINET_SIGNING_KEY,process.env.TG_LOGIN
 // к nonce входного cookie браузера и подтверждается ботом через ключ моста.
 const LOGIN_CODE=/^[a-f0-9]{32}$/,pendingLogins=new Map();
 function sweepLogins(){const t=Date.now();for(const[k,v]of pendingLogins)if(v.exp<t)pendingLogins.delete(k)}
+const passwordTraffic=new Map();
 const server=http.createServer(async(req,res)=>{
   try{
     if(req.url==='/internal/bridge/poll'||req.url==='/internal/bridge/result'||req.url==='/internal/bridge/login'){
@@ -71,6 +73,14 @@ const server=http.createServer(async(req,res)=>{
       if(redirect){res.writeHead(303,{Location:'/','Set-Cookie':cookies,'Cache-Control':'no-store, private','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});res.end();return}
       answer({ok:true},200,cookies);
     }
+    if(url.pathname==='/auth/start'){
+      if(req.method!=='GET'){answer({error:'Метод не поддерживается'},405);return}
+      const botId=process.env.TG_LOGIN_BOT_ID||(browserAuth.bot==='postprocess_bot'?'8390363520':'');
+      if(!browserAuth.enabled||!bridge||!/^\d+$/.test(botId)){answer({error:'Вход ещё настраивается. Откройте кабинет через Telegram-бота.'},503);return}
+      const flow=browserAuth.challenge();
+      const target=new URL('https://oauth.telegram.org/auth');target.searchParams.set('bot_id',botId);target.searchParams.set('origin',base);target.searchParams.set('lang','ru');target.searchParams.set('return_to',base+'/?login_state='+flow.csrf);
+      res.writeHead(302,{Location:target.href,'Set-Cookie':flow.cookie,'Cache-Control':'no-store, private','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});res.end();return;
+    }
     if(url.pathname==='/auth/callback'){
       if(req.method!=='GET'){answer({error:'Метод не поддерживается'},405);return}
       const entries=[...url.searchParams];
@@ -105,6 +115,19 @@ const server=http.createServer(async(req,res)=>{
       if(!login.uid){answer({pending:true});return}
       pendingLogins.delete(code);
       await finishLogin(login.uid);return;
+    }
+    if(['/api/password/login','/api/password/activate'].includes(url.pathname)){
+      if(req.method!=='POST'||origin!==url.origin){answer({error:'Запрос отклонён'},403);return}
+      const client=req.socket.remoteAddress||'proxy',now=Date.now();for(const [key,record] of passwordTraffic)if(now-record.since>60000)passwordTraffic.delete(key);const traffic=passwordTraffic.get(client)||{since:now,count:0};if(traffic.count>=120||passwordTraffic.size>2000){answer({error:'Слишком много попыток. Повторите позднее.'},429);return}traffic.count++;passwordTraffic.set(client,traffic);
+      const value=JSON.parse(body),action=url.pathname.endsWith('/activate')?'password-activate':'password-login';
+      if(!bridge||!browserAuth.accepts(req.headers.cookie,value.csrf)){answer({error:'Обновите страницу и повторите вход'},403);return}
+      const login=String(value.login||'').trim().toLowerCase(),password=value.password,code=value.code;
+      if(!/^[a-z0-9._-]{3,48}$/.test(login)||typeof password!=='string'||password.length>128||password.length<(action==='password-activate'?10:1)||/[\x00-\x1f]/.test(password)||action==='password-activate'&&!/^[A-Za-z0-9_-]{32}$/.test(code||'')){answer({error:'Проверьте логин, пароль и код активации'},401);return}
+      const source=new URL('https://productionwages.axiomalink.ru/api/v1/cabinet/'+action);source.searchParams.set('login',login);source.searchParams.set('password',password);if(action==='password-activate')source.searchParams.set('code',code);
+      const proof=await bridge.source(source),verified=await proof.json();
+      if(proof.status===403||proof.status===422){answer({error:proof.status===403&&String(verified.error).includes('15 минут')?'Слишком много попыток. Повторите через 15 минут.':'Неверный логин, пароль или код активации'},401);return}
+      if(!proof.ok||verified.source!=='employee-cabinet-local'||!Number.isSafeInteger(verified.telegram_id)||verified.telegram_id<=0||!Number.isSafeInteger(verified.employee_id)||verified.employee_id<=0){answer({error:'Не удалось проверить аккаунт. Попробуйте позднее.'},503);return}
+      answer({ok:true},200,browserAuth.login(verified.telegram_id,verified.employee_id));return;
     }
     if(url.pathname==='/api/login'||url.pathname==='/api/logout'){
       if(req.method!=='POST'||origin!==url.origin){answer({error:'Запрос отклонён'},403);return}
