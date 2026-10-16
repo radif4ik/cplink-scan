@@ -69,6 +69,13 @@ function period(day){const y=Number(day.slice(0,4)),m=Number(day.slice(5,7)),d=N
 export function selectDay(value){const current=today(); const p=period(current); const next=p.start.endsWith('01')?current.slice(0,8)+'16':new Date(Date.UTC(Number(current.slice(0,4)),Number(current.slice(5,7)),1)).toISOString().slice(0,10); const max=period(next).end; const s=value||current; if(!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(s)) || new Date(s).toISOString().slice(0,10)!==s || s<'2026-09-16' || s>max) throw new Denied('Выберите доступный расчётный период',422);return s;}
 async function upstream(path, env, params){if(!env.PRODUCTION_API_KEY && typeof env.PRODUCTION_FETCH!=='function') throw new Denied('Кабинет ещё настраивается',503);const url=new URL(path,API); for(const[k,v]of Object.entries(params||{}))if(v!=null)url.searchParams.set(k,String(v));let r;try{r=await (env.PRODUCTION_FETCH||fetch)(url,{headers:{Authorization:'Bearer '+(env.PRODUCTION_API_KEY||''),Accept:'application/json'},redirect:'error',signal:AbortSignal.timeout(20000)});}catch{throw new Denied('Портал временно не отвечает. Попробуйте обновить позже',503);}if(!r.ok)throw new Denied('Не удалось получить данные с портала',503);const data=await r.json();if(path==='ping'?data.client!=='production-bot':data.source!=='productionwages')throw new Denied('Источник данных не прошёл проверку',503);return data;}
 const pick=(o,keys)=>o?Object.fromEntries(keys.filter(k=>Object.hasOwn(o,k)).map(k=>[k,o[k]])):null;
+// Enforce recipient privacy here too, including when a local source has not restarted yet.
+function privateHub(data,t){
+ if(data.source!=='employee-cabinet-local'||data.telegram_id!==t.uid||String(data.employee_id)!==String(t.employee_id)||!Array.isArray(data.posts)||!Array.isArray(data.people))throw new Denied('Не удалось проверить личные благодарности',503);
+ const selves=data.people.filter(p=>p.self===true);
+ if(selves.length!==1||typeof selves[0].name!=='string'||!selves[0].name||data.people.filter(p=>p.name===selves[0].name).length!==1)throw new Denied('Не удалось проверить получателя',503);
+ return {...data,posts:data.posts.filter(p=>p.kind!=='thanks'||p.recipient_name===selves[0].name),thanks_visibility:'recipient'};
+}
 function snapshot(d){return {as_of:d.as_of,period:d.period,postpress:pick(d.postpress,['home_area','areas','point_price','point_price_min','point_price_by_grid','skill_sum','price_since','price_problem']),prepress:pick(d.prepress,['skills','waiting','level','mastered_count','catalog_count','share_percent','point_price','point_price_min','price_since']),digital_print:pick(d.digital_print,['level','salary_by_level','salary_in_payroll','individual_salary']),problems:d.problems||[],generated_at:d.generated_at,data_updated_at:d.data_updated_at};}
 function journal(d,id){if(String(d.employee_id)!==String(id)||!Array.isArray(d.records))throw new Denied('Данные сотрудника не прошли проверку',503);return {records:d.records.map(r=>pick(r,['id','event','area','skill','level','entered_on','effective_from','basis','examiner','status','cancel_reason'])),next_cursor:d.next_cursor||null,total:d.total};}
 export default {async fetch(request,env){const u=new URL(request.url); if(u.pathname==='/api/weather'&&request.method==='GET')return json(await getKazanWeather()); if(u.pathname==='/health' && request.method==='GET')return json({ok:true,service:'employee-cabinet'});
@@ -97,9 +104,15 @@ export default {async fetch(request,env){const u=new URL(request.url); if(u.path
         if(!pattern.test(value))throw new Denied('Проверьте поля заявки',422);
         if(key!=='refresh'||value)source.searchParams.set(key,value);
       }
-      const r=await env.PRODUCTION_FETCH(source);const data=await r.json();
+      if(['cabinet/hub-photo','cabinet/hub-react','cabinet/hub-review'].includes(path)){
+        const check=new URL('cabinet/hub',API);check.searchParams.set('telegram_id',String(t.uid));check.searchParams.set('employee_id',String(t.employee_id));
+        const response=await env.PRODUCTION_FETCH(check);if(!response.ok)throw new Denied('Не удалось проверить доступ к публикации',503);
+        const hub=privateHub(await response.json(),t);if(!hub.posts.some(p=>p.id===b.id))throw new Denied('Публикация недоступна',403);
+      }
+      const r=await env.PRODUCTION_FETCH(source);let data=await r.json();
       if([403,409,422].includes(r.status))throw new Denied(data.error||'Этот запрос недоступен',r.status);
       if(!r.ok||data.source!=='employee-cabinet-local'||data.telegram_id!==t.uid||String(data.employee_id)!==String(t.employee_id))throw new Denied('Не удалось получить данные сотрудника',503);
+      if(path==='cabinet/hub')data=privateHub(data,t);
       return json(data);
     }
     if(u.pathname==='/api/history'){if(b.cursor!=null && (typeof b.cursor!=='string'||b.cursor.length>1024))throw new Denied('Некорректная страница истории',422);return json(journal(await upstream('employees/'+t.employee_id+'/attestations',env,{limit:100,cursor:b.cursor}),t.employee_id));}
