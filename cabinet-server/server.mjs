@@ -1,7 +1,7 @@
 import http from 'node:http';
 import {randomBytes} from 'node:crypto';
 import worker from './cabinet-worker.mjs';
-import {createBridge} from './bridge.mjs';
+import {createBridge,createAttendanceAPI} from './bridge.mjs';
 import {createBrowserAuth} from './browser-auth.mjs';
 
 const port=Number(process.env.PORT||8080);
@@ -19,9 +19,11 @@ for(const key of ['TG_WEBAPP_SECRET','CABINET_SIGNING_KEY'])if(!/^[a-f0-9]{64}$/
 const allowed=new Set(['/','/health','/ready','/api/weather','/api/cabinet','/api/history','/api/score','/api/score/calendar','/api/orders','/api/order','/api/session','/api/login','/api/logout','/auth/start','/auth/callback','/api/notifications','/api/notifications/read','/api/scan','/api/operation/prepare','/api/operation/confirm','/api/operation/status','/api/workbench','/api/activity','/api/payroll','/api/requests','/api/requests/create','/api/requests/review','/api/requests/photo','/api/login/start','/api/login/status']);
 for(const p of ["/api/hub", "/api/hub/create", "/api/hub/react", "/api/hub/review", "/api/hub/photo", "/api/hub/settings", "/api/hub/shift", "/api/push/info", "/api/push/save", "/api/push/remove"])allowed.add(p);
 for(const p of ['/api/password/login','/api/password/activate','/api/access/list','/api/access/issue'])allowed.add(p);
+for(const p of ['/api/attendance','/api/attendance/create','/api/attendance/review','/api/attendance/cancel'])allowed.add(p);
 for(const p of ['/sw.js','/manifest.webmanifest','/offline.html','/icon-192.png','/icon-512.png'])allowed.add(p);
 const bridge=process.env.PRODUCTION_SOURCE==='local-bridge'?createBridge(env.CABINET_SIGNING_KEY):null;
 if(bridge)env.PRODUCTION_FETCH=bridge.source;
+const attendanceAPI=createAttendanceAPI(env.CABINET_SIGNING_KEY,bridge?.source,process.env.ATTENDANCE_INTEGRATION_TOKEN);
 const browserAuth=createBrowserAuth(env.CABINET_SIGNING_KEY,process.env.TG_LOGIN_SECRET,process.env.TG_LOGIN_BOT_USERNAME||'postprocess_bot');
 // Вход через приложение Telegram: виджет живёт на oauth.telegram.org, а с
 // мобильного интернета этот домен молча недоступен. Код живёт 5 минут, привязан
@@ -31,6 +33,7 @@ function sweepLogins(){const t=Date.now();for(const[k,v]of pendingLogins)if(v.ex
 const passwordTraffic=new Map();
 const server=http.createServer(async(req,res)=>{
   try{
+    if(await attendanceAPI(req,res))return;
     if(req.url==='/internal/bridge/poll'||req.url==='/internal/bridge/result'||req.url==='/internal/bridge/login'){
       res.setHeader('Cache-Control','no-store');
       if(!bridge||req.method!=='POST'||!bridge.authorized(req.headers.authorization)){res.writeHead(401);res.end();return}
