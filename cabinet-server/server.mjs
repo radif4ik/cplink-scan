@@ -17,7 +17,7 @@ const env=Object.fromEntries(['PRODUCTION_API_KEY','TG_WEBAPP_SECRET','CABINET_S
 }));
 for(const key of ['TG_WEBAPP_SECRET','CABINET_SIGNING_KEY'])if(!/^[a-f0-9]{64}$/i.test(env[key]))throw Error('Invalid '+key);
 const allowed=new Set(['/','/health','/ready','/api/weather','/api/cabinet','/api/history','/api/score','/api/score/calendar','/api/orders','/api/order','/api/session','/api/login','/api/logout','/auth/start','/auth/callback','/api/notifications','/api/notifications/read','/api/scan','/api/operation/prepare','/api/operation/confirm','/api/operation/status','/api/workbench','/api/activity','/api/payroll','/api/requests','/api/requests/create','/api/requests/review','/api/requests/photo','/api/login/start','/api/login/status']);
-for(const p of ["/api/hub", "/api/hub/create", "/api/hub/react", "/api/hub/review", "/api/hub/photo", "/api/hub/settings", "/api/hub/shift", "/api/push/info", "/api/push/save", "/api/push/remove"])allowed.add(p);
+for(const p of ["/api/hub", "/api/hub/create", "/api/hub/edit", "/api/hub/comments", "/api/hub/comment/create", "/api/hub/comment/edit", "/api/hub/comment/remove", "/api/hub/react", "/api/hub/review", "/api/hub/photo", "/api/hub/settings", "/api/hub/shift", "/api/push/info", "/api/push/save", "/api/push/remove"])allowed.add(p);
 for(const p of ['/api/password/login','/api/password/activate','/api/access/list','/api/access/issue'])allowed.add(p);
 for(const p of ['/api/attendance','/api/attendance/create','/api/attendance/review','/api/attendance/cancel'])allowed.add(p);
 for(const p of ['/sw.js','/manifest.webmanifest','/offline.html','/icon-192.png','/icon-512.png'])allowed.add(p);
@@ -96,7 +96,7 @@ const server=http.createServer(async(req,res)=>{
     }
     if(req.method==='HEAD'&&url.pathname==='/health'){res.writeHead(200,{'Cache-Control':'no-store'});res.end();return}
     let size=0;const chunks=[];
-    for await(const chunk of req){size+=chunk.length;if(size>(['/api/requests/create','/api/hub/create'].includes(url.pathname)?240000:20000)){res.writeHead(413);res.end();return}chunks.push(chunk)}
+    for await(const chunk of req){size+=chunk.length;if(size>(['/api/requests/create','/api/hub/create','/api/hub/edit'].includes(url.pathname)?240000:20000)){res.writeHead(413);res.end();return}chunks.push(chunk)}
     const body=Buffer.concat(chunks).toString('utf8');
     if(url.pathname==='/api/login/start'||url.pathname==='/api/login/status'){
       if(req.method!=='POST'||origin!==url.origin){answer({error:'Запрос отклонён'},403);return}
