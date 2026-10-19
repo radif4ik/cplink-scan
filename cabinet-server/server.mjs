@@ -21,6 +21,7 @@ for(const p of ["/api/hub", "/api/hub/create", "/api/hub/edit", "/api/hub/commen
 for(const p of ['/api/password/login','/api/password/activate','/api/access/list','/api/access/issue'])allowed.add(p);
 for(const p of ['/api/attendance','/api/attendance/create','/api/attendance/review','/api/attendance/cancel'])allowed.add(p);
 for(const p of ['/sw.js','/manifest.webmanifest','/offline.html','/icon-192.png','/icon-512.png'])allowed.add(p);
+for(const p of ['/api/members','/api/members/profile','/api/members/photo','/api/members/like','/api/members/save'])allowed.add(p);
 const bridge=process.env.PRODUCTION_SOURCE==='local-bridge'?createBridge(env.CABINET_SIGNING_KEY):null;
 if(bridge)env.PRODUCTION_FETCH=bridge.source;
 const attendanceAPI=createAttendanceAPI(env.CABINET_SIGNING_KEY,bridge?.source,process.env.ATTENDANCE_INTEGRATION_TOKEN);
@@ -96,7 +97,7 @@ const server=http.createServer(async(req,res)=>{
     }
     if(req.method==='HEAD'&&url.pathname==='/health'){res.writeHead(200,{'Cache-Control':'no-store'});res.end();return}
     let size=0;const chunks=[];
-    for await(const chunk of req){size+=chunk.length;if(size>(['/api/requests/create','/api/hub/create','/api/hub/edit'].includes(url.pathname)?240000:20000)){res.writeHead(413);res.end();return}chunks.push(chunk)}
+    for await(const chunk of req){size+=chunk.length;if(size>(['/api/requests/create','/api/hub/create','/api/hub/edit','/api/members/save'].includes(url.pathname)?240000:20000)){res.writeHead(413);res.end();return}chunks.push(chunk)}
     const body=Buffer.concat(chunks).toString('utf8');
     if(url.pathname==='/api/login/start'||url.pathname==='/api/login/status'){
       if(req.method!=='POST'||origin!==url.origin){answer({error:'Запрос отклонён'},403);return}
