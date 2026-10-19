@@ -12,7 +12,7 @@ async function kbIdentity(request,env){
 }
 async function kbSource(env,t,asset,start,limit){
  if(typeof env.PRODUCTION_FETCH!=='function')throw new KnowledgeError('Сервер файлов недоступен');
- const url=new URL('https://productionwages.axiomalink.ru/api/v1/cabinet/'+(asset?'knowledge-media':'identity'));url.searchParams.set('telegram_id',String(t.uid));url.searchParams.set('employee_id',String(t.employee_id));
+ const url=new URL('https://productionwages.axiomalink.ru/api/v1/cabinet/'+(asset?'knowledge-media':'identity'));url.searchParams.set('telegram_id',String(t.uid));if(asset)url.searchParams.set('employee_id',String(t.employee_id));
  if(asset)for(const[k,v]of Object.entries({asset,offset:start,limit}))url.searchParams.set(k,String(v));
  const r=await env.PRODUCTION_FETCH(url),d=await r.json();if([403,422].includes(r.status))throw new KnowledgeError(d.error||'Материал недоступен',r.status);
  if(!r.ok||d.source!=='employee-cabinet-local'||d.telegram_id!==t.uid||String(d.employee_id)!==String(t.employee_id))throw new KnowledgeError('Не удалось проверить доступ к файлу');
