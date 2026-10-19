@@ -20,7 +20,7 @@ const allowed=new Set(['/','/health','/ready','/api/weather','/api/cabinet','/ap
 for(const p of ["/api/hub", "/api/hub/create", "/api/hub/edit", "/api/hub/comments", "/api/hub/comment/create", "/api/hub/comment/edit", "/api/hub/comment/remove", "/api/hub/react", "/api/hub/review", "/api/hub/photo", "/api/hub/settings", "/api/hub/shift", "/api/push/info", "/api/push/save", "/api/push/remove"])allowed.add(p);
 for(const p of ['/api/password/login','/api/password/activate','/api/access/list','/api/access/issue'])allowed.add(p);
 for(const p of ['/api/attendance','/api/attendance/create','/api/attendance/review','/api/attendance/cancel'])allowed.add(p);
-for(const p of ['/sw.js','/manifest.webmanifest','/offline.html','/icon-192.png','/icon-512.png'])allowed.add(p);
+for(const p of ['/favicon.ico','/sw.js','/manifest.webmanifest','/offline.html','/icon-192.png','/icon-512.png'])allowed.add(p);
 for(const p of ['/api/members','/api/members/profile','/api/members/photo','/api/members/like','/api/members/save'])allowed.add(p);
 const bridge=process.env.PRODUCTION_SOURCE==='local-bridge'?createBridge(env.CABINET_SIGNING_KEY):null;
 if(bridge)env.PRODUCTION_FETCH=bridge.source;
