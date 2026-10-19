@@ -1,3 +1,5 @@
+import {Readable} from 'node:stream';
+import {pipeline} from 'node:stream/promises';
 import http from 'node:http';
 import {randomBytes} from 'node:crypto';
 import worker from './cabinet-worker.mjs';
@@ -25,6 +27,7 @@ allowed.add('/api/attendance/sync');
 for(const p of ['/api/members','/api/members/profile','/api/members/photo','/api/members/like','/api/members/save'])allowed.add(p);
 for(const p of ["/api/engagement", "/api/engagement/post", "/api/engagement/comment", "/api/engagement/notification", "/api/engagement/poll/create", "/api/engagement/poll/vote", "/api/engagement/poll/close", "/api/engagement/article/save", "/api/engagement/article/action", "/api/engagement/photo", "/api/engagement/lesson/save", "/api/engagement/lesson/answer", "/api/engagement/onboard"])allowed.add(p);
 
+allowed.add('/api/knowledge/session');allowed.add('/api/knowledge/media');
 const bridge=process.env.PRODUCTION_SOURCE==='local-bridge'?createBridge(env.CABINET_SIGNING_KEY):null;
 if(bridge)env.PRODUCTION_FETCH=bridge.source;
 const attendanceAPI=createAttendanceAPI(env.CABINET_SIGNING_KEY,bridge?.source,process.env.ATTENDANCE_INTEGRATION_TOKEN);
@@ -138,11 +141,12 @@ const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/login'||url.pathname==='/api/logout'){
       if(req.method!=='POST'||origin!==url.origin){answer({error:'Запрос отклонён'},403);return}
-      if(url.pathname==='/api/logout'){answer({ok:true},200,browserAuth.logout());return}
+      if(url.pathname==='/api/logout'){answer({ok:true},200,[...browserAuth.logout(),'__Secure-cplink_kb=; Path=/api/knowledge/; Max-Age=0; HttpOnly; Secure; SameSite=Strict']);return}
       const value=JSON.parse(body);
       await completeLogin(value.user,value.csrf);return;
     }
     const requestEnv={...env};
+    if(session&&['GET','HEAD'].includes(req.method)&&url.pathname==='/api/knowledge/media')requestEnv.BROWSER_IDENTITY={uid:session.uid,employee_id:session.employee_id,exp:session.exp};
     if(session&&req.method==='POST'){
       if(origin!==url.origin){answer({error:'Запрос отклонён'},403);return}
       const value=JSON.parse(body);
@@ -150,8 +154,10 @@ const server=http.createServer(async(req,res)=>{
     }
     const request=new Request(url,{method:req.method,headers:req.headers,...(!['GET','HEAD'].includes(req.method)?{body}:{})});
     const result=await worker.fetch(request,requestEnv);
-    res.writeHead(result.status,Object.fromEntries(result.headers));res.end(Buffer.from(await result.arrayBuffer()));
-  }catch{res.writeHead(500,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end('{"error":"Кабинет временно недоступен"}')}
+    res.writeHead(result.status,Object.fromEntries(result.headers));
+    if(url.pathname==='/api/knowledge/media'&&result.body){await pipeline(Readable.fromWeb(result.body),res);return}
+    res.end(Buffer.from(await result.arrayBuffer()));
+  }catch{if(res.headersSent){res.destroy();return}res.writeHead(500,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end('{"error":"Кабинет временно недоступен"}')}
 });
 server.headersTimeout=15000;server.requestTimeout=30000;
 server.listen(port,'0.0.0.0',()=>console.log('Employee cabinet ready on port '+port));
