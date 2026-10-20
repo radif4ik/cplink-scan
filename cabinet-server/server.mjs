@@ -66,6 +66,7 @@ const server=http.createServer(async(req,res)=>{
     const url=new URL(req.url,origin||base);
     if(!origins.includes(url.origin)||!allowed.has(url.pathname)){res.writeHead(404);res.end();return}
     const session=browserAuth.session(req.headers.cookie);
+    const renewal=session?browserAuth.renew(req.headers.cookie):null;
     function answer(data,status=200,cookies){res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store, private','Referrer-Policy':'no-referrer',...(cookies?{'Set-Cookie':cookies}:{})});res.end(JSON.stringify(data))}
     async function completeLogin(user,csrf,redirect=false){
       if(!browserAuth.enabled||!bridge){answer({error:'Вход через браузер ещё настраивается'},503);return}
@@ -99,7 +100,7 @@ const server=http.createServer(async(req,res)=>{
       await completeLogin(user,url.searchParams.get('state'),true);return;
     }
     if(url.pathname==='/api/session'&&req.method==='GET'){
-      const flow=browserAuth.challenge(req.headers.cookie);answer({authenticated:!!session,login_enabled:browserAuth.enabled,app_login:!!bridge,bot:browserAuth.bot,csrf:flow.csrf},200,flow.cookie?[flow.cookie]:undefined);return;
+      const flow=browserAuth.challenge(req.headers.cookie);answer({authenticated:!!session,login_enabled:browserAuth.enabled,app_login:!!bridge,bot:browserAuth.bot,csrf:flow.csrf},200,[...(flow.cookie?[flow.cookie]:[]),...(renewal?[renewal]:[])]);return;
     }
     if(req.method==='HEAD'&&url.pathname==='/health'){res.writeHead(200,{'Cache-Control':'no-store'});res.end();return}
     let size=0;const chunks=[];
@@ -154,7 +155,9 @@ const server=http.createServer(async(req,res)=>{
     }
     const request=new Request(url,{method:req.method,headers:req.headers,...(!['GET','HEAD'].includes(req.method)?{body}:{})});
     const result=await worker.fetch(request,requestEnv);
-    res.writeHead(result.status,Object.fromEntries(result.headers));
+    const responseHeaders=Object.fromEntries(result.headers);
+    if(renewal&&result.ok)responseHeaders['set-cookie']=[...result.headers.getSetCookie(),renewal];
+    res.writeHead(result.status,responseHeaders);
     if(url.pathname==='/api/knowledge/media'&&result.body){await pipeline(Readable.fromWeb(result.body),res);return}
     res.end(Buffer.from(await result.arrayBuffer()));
   }catch{if(res.headersSent){res.destroy();return}res.writeHead(500,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end('{"error":"Кабинет временно недоступен"}')}
