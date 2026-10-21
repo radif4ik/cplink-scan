@@ -1,7 +1,8 @@
 import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import http from 'node:http';
-import {randomBytes} from 'node:crypto';
+import {randomBytes,createHash} from 'node:crypto';
+import {brotliCompressSync,gzipSync,constants as zlibConstants} from 'node:zlib';
 import worker from './cabinet-worker.mjs';
 import {createBridge,createAttendanceAPI} from './bridge.mjs';
 import {createBrowserAuth} from './browser-auth.mjs';
@@ -36,6 +37,15 @@ const browserAuth=createBrowserAuth(env.CABINET_SIGNING_KEY,process.env.TG_LOGIN
 // мобильного интернета этот домен молча недоступен. Код живёт 5 минут, привязан
 // к nonce входного cookie браузера и подтверждается ботом через ключ моста.
 const LOGIN_CODE=/^[a-f0-9]{32}$/,pendingLogins=new Map();
+// С мобильного кабинет открывался секунды: страница 1 МБ шла без сжатия и с no-store.
+// Текст сжимается; оболочка страницы получает ETag — она одинакова для всех,
+// личного в ней нет, оно приходит запросами /api/*, и те остаются no-store.
+const COMPRESSIBLE=/^(text\/|application\/(javascript|json|manifest\+json))/,shellCache=new Map();
+function compress(body,accept){
+  if(/\bbr\b/.test(accept))return ['br',brotliCompressSync(body,{params:{[zlibConstants.BROTLI_PARAM_QUALITY]:5}})];
+  if(/\bgzip\b/.test(accept))return ['gzip',gzipSync(body,{level:6})];
+  return [null,body];
+}
 function sweepLogins(){const t=Date.now();for(const[k,v]of pendingLogins)if(v.exp<t)pendingLogins.delete(k)}
 const passwordTraffic=new Map();
 const server=http.createServer(async(req,res)=>{
@@ -64,7 +74,9 @@ const server=http.createServer(async(req,res)=>{
     const base=origins.find(x=>new URL(x).host===host)||origins[0];
     if(origin&&!origins.includes(origin)){res.writeHead(403,{'Cache-Control':'no-store'});res.end();return}
     const url=new URL(req.url,origin||base);
-    if(!origins.includes(url.origin)||!allowed.has(url.pathname)){res.writeHead(404);res.end();return}
+    // Совы — отдельные файлы с хешем в имени; другие пути под /assets/ не открываются.
+    const asset=/^\/assets\/owl-[a-z]+-[a-f0-9]{12}\.webp$/.test(url.pathname);
+    if(!origins.includes(url.origin)||!allowed.has(url.pathname)&&!asset){res.writeHead(404);res.end();return}
     const session=browserAuth.session(req.headers.cookie);
     const renewal=session?browserAuth.renew(req.headers.cookie):null;
     function answer(data,status=200,cookies){res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store, private','Referrer-Policy':'no-referrer',...(cookies?{'Set-Cookie':cookies}:{})});res.end(JSON.stringify(data))}
@@ -157,9 +169,29 @@ const server=http.createServer(async(req,res)=>{
     const result=await worker.fetch(request,requestEnv);
     const responseHeaders=Object.fromEntries(result.headers);
     if(renewal&&result.ok)responseHeaders['set-cookie']=[...result.headers.getSetCookie(),renewal];
-    res.writeHead(result.status,responseHeaders);
-    if(url.pathname==='/api/knowledge/media'&&result.body){await pipeline(Readable.fromWeb(result.body),res);return}
-    res.end(Buffer.from(await result.arrayBuffer()));
+    // Видео базы знаний идёт потоком, как и было: не сжимаем и не собираем в память.
+    if(url.pathname==='/api/knowledge/media'&&result.body){res.writeHead(result.status,responseHeaders);await pipeline(Readable.fromWeb(result.body),res);return}
+    let payload=Buffer.from(await result.arrayBuffer());
+    const accept=String(req.headers['accept-encoding']||'');
+    if(req.method==='GET'&&url.pathname==='/'&&result.status===200){
+      const etag='W/"'+createHash('sha256').update(payload).digest('base64url').slice(0,22)+'"';
+      responseHeaders['cache-control']='private, no-cache';responseHeaders.etag=etag;responseHeaders.vary='Accept-Encoding';
+      if(req.headers['if-none-match']===etag){
+        // Продление сессии отдаётся и здесь, иначе вход слетит у открывающих из кэша.
+        const notModified={'cache-control':responseHeaders['cache-control'],etag,vary:responseHeaders.vary};
+        if(responseHeaders['set-cookie'])notModified['set-cookie']=responseHeaders['set-cookie'];
+        res.writeHead(304,notModified);res.end();return;
+      }
+      // Оболочка неизменна до нового выпуска — сжимаем её один раз на кодировку.
+      const key=etag+'|'+(/\bbr\b/.test(accept)?'br':/\bgzip\b/.test(accept)?'gzip':'');
+      if(!shellCache.has(key)){if(shellCache.size>8)shellCache.clear();shellCache.set(key,compress(payload,accept))}
+      const [encoding,packed]=shellCache.get(key);
+      if(encoding){responseHeaders['content-encoding']=encoding;delete responseHeaders['content-length'];payload=packed}
+    }else if(payload.length>1024&&COMPRESSIBLE.test(String(responseHeaders['content-type']||''))&&!responseHeaders['content-encoding']){
+      const [encoding,packed]=compress(payload,accept);
+      if(encoding){responseHeaders['content-encoding']=encoding;responseHeaders.vary='Accept-Encoding';delete responseHeaders['content-length'];payload=packed}
+    }
+    res.writeHead(result.status,responseHeaders);res.end(payload);
   }catch{if(res.headersSent){res.destroy();return}res.writeHead(500,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end('{"error":"Кабинет временно недоступен"}')}
 });
 server.headersTimeout=15000;server.requestTimeout=30000;
