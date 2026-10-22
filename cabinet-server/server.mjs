@@ -74,8 +74,8 @@ const server=http.createServer(async(req,res)=>{
     const base=origins.find(x=>new URL(x).host===host)||origins[0];
     if(origin&&!origins.includes(origin)){res.writeHead(403,{'Cache-Control':'no-store'});res.end();return}
     const url=new URL(req.url,origin||base);
-    // Совы — отдельные файлы с хешем в имени; другие пути под /assets/ не открываются.
-    const asset=/^\/assets\/owl-[a-z]+-[a-f0-9]{12}\.webp$/.test(url.pathname);
+    // Совы и шрифты — отдельные файлы с хешем в имени; другие пути под /assets/ не открываются.
+    const asset=/^\/assets\/(owl-[a-z]+-[a-f0-9]{12}\.webp|font-[a-z-]+-[a-f0-9]{12}\.woff2)$/.test(url.pathname);
     if(!origins.includes(url.origin)||!allowed.has(url.pathname)&&!asset){res.writeHead(404);res.end();return}
     const session=browserAuth.session(req.headers.cookie);
     const renewal=session?browserAuth.renew(req.headers.cookie):null;
