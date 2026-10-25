@@ -1,3 +1,4 @@
+import {readFile} from 'node:fs/promises';
 import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import http from 'node:http';
@@ -19,12 +20,19 @@ const env=Object.fromEntries(['PRODUCTION_API_KEY','TG_WEBAPP_SECRET','CABINET_S
   const value=process.env[key];if(!value&&!(key==='PRODUCTION_API_KEY'&&process.env.PRODUCTION_SOURCE==='local-bridge'))throw Error('Missing '+key);return [key,value];
 }));
 for(const key of ['TG_WEBAPP_SECRET','CABINET_SIGNING_KEY'])if(!/^[a-f0-9]{64}$/i.test(env[key]))throw Error('Invalid '+key);
+// Versioned APK distribution and the public signing-certificate association.
+const androidFiles=new Map([
+ ['/.well-known/assetlinks.json',{file:'assetlinks.json',type:'application/json; charset=utf-8',cache:'public, max-age=3600'}],
+ ['/downloads/cplink-lk-1.0.0.apk',{file:'cplink-lk-1.0.0.apk',type:'application/vnd.android.package-archive',cache:'public, max-age=31536000, immutable'}]
+]);
+const androidFileCache=new Map();
 const allowed=new Set(['/','/health','/ready','/api/weather','/api/cabinet','/api/history','/api/score','/api/score/calendar','/api/orders','/api/order','/api/session','/api/login','/api/logout','/auth/start','/auth/callback','/api/notifications','/api/notifications/read','/api/scan','/api/operation/prepare','/api/operation/confirm','/api/operation/status','/api/workbench','/api/activity','/api/payroll','/api/requests','/api/requests/create','/api/requests/review','/api/requests/photo','/api/login/start','/api/login/status']);
 for(const p of ["/api/hub", "/api/hub/create", "/api/hub/edit", "/api/hub/comments", "/api/hub/comment/create", "/api/hub/comment/edit", "/api/hub/comment/remove", "/api/hub/react", "/api/hub/review", "/api/hub/photo", "/api/hub/settings", "/api/hub/shift", "/api/push/info", "/api/push/save", "/api/push/remove"])allowed.add(p);
 for(const p of ['/api/password/login','/api/password/activate','/api/access/list','/api/access/issue'])allowed.add(p);
 for(const p of ['/api/attendance','/api/attendance/create','/api/attendance/review','/api/attendance/cancel'])allowed.add(p);
 for(const p of ['/favicon.ico','/sw.js','/manifest.webmanifest','/offline.html','/icon-192.png','/icon-512.png'])allowed.add(p);
 allowed.add('/api/attendance/sync');
+allowed.add('/notification-badge-v1.png');for(const path of androidFiles.keys())allowed.add(path);
 for(const p of ['/api/members','/api/members/profile','/api/members/photo','/api/members/like','/api/members/save'])allowed.add(p);
 for(const p of ["/api/engagement", "/api/engagement/post", "/api/engagement/comment", "/api/engagement/notification", "/api/engagement/poll/create", "/api/engagement/poll/vote", "/api/engagement/poll/close", "/api/engagement/article/save", "/api/engagement/article/action", "/api/engagement/photo", "/api/engagement/lesson/save", "/api/engagement/lesson/answer", "/api/engagement/onboard"])allowed.add(p);
 
@@ -77,6 +85,17 @@ const server=http.createServer(async(req,res)=>{
     // Совы, ролики Линки и шрифты — отдельные файлы с хешем в имени; другие пути под /assets/ не открываются.
     const asset=/^\/assets\/(owl-[a-z]+-[a-f0-9]{12}\.webp|linky-[a-z]+-[a-f0-9]{12}\.(?:webm|webp)|font-[a-z-]+-[a-f0-9]{12}\.woff2)$/.test(url.pathname);
     if(!origins.includes(url.origin)||!allowed.has(url.pathname)&&!asset){res.writeHead(404);res.end();return}
+    const androidFile=androidFiles.get(url.pathname);
+    if(androidFile){
+      if(!['GET','HEAD'].includes(req.method)){res.writeHead(405,{Allow:'GET, HEAD'});res.end();return}
+      let body=androidFileCache.get(androidFile.file);
+      if(!body){body=await readFile(new URL('./public/'+androidFile.file,import.meta.url));androidFileCache.set(androidFile.file,body)}
+      const etag='"'+createHash('sha256').update(body).digest('hex')+'"';
+      const h={'Content-Type':androidFile.type,'Cache-Control':androidFile.cache,'X-Content-Type-Options':'nosniff','ETag':etag};
+      if(androidFile.file.endsWith('.apk'))h['Content-Disposition']='attachment; filename="'+androidFile.file+'"';
+      if(req.headers['if-none-match']===etag){res.writeHead(304,h);res.end();return}
+      res.writeHead(200,{...h,'Content-Length':body.length});res.end(req.method==='HEAD'?undefined:body);return;
+    }
     const session=browserAuth.session(req.headers.cookie);
     const renewal=session?browserAuth.renew(req.headers.cookie):null;
     function answer(data,status=200,cookies){res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store, private','Referrer-Policy':'no-referrer',...(cookies?{'Set-Cookie':cookies}:{})});res.end(JSON.stringify(data))}

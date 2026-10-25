@@ -4,3 +4,7 @@
 !cabinet-worker.mjs
 !bridge.mjs
 !browser-auth.mjs
+
+!public/
+!public/assetlinks.json
+!public/cplink-lk-1.0.0.apk

@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "ru.cplink.lk",
+      "sha256_cert_fingerprints": [
+        "9D:3F:F9:11:D5:0F:11:FD:4E:1E:D3:89:2D:80:03:5B:FD:25:45:B5:EB:B6:8F:C4:2E:91:8C:9A:0D:39:1A:5F"
+      ]
+    }
+  }
+]
