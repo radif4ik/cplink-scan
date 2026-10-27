@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "package": "ru.cplink.lk",
-  "version_code": 9,
-  "version_name": "2.1.4",
+  "version_code": 10,
+  "version_name": "2.1.5",
   "min_sdk": 24,
-  "url": "https://cplink-lk.ru/downloads/cplink-lk-2.1.4.apk",
+  "url": "https://cplink-lk.ru/downloads/cplink-lk-2.1.5.apk",
   "bytes": 6712228,
-  "sha256": "86245efe9d8af2ed9990f3f17bf33c3271f7685478c6264ad8a06742cf5870cf",
-  "notes": "Автообновления: проверка и загрузка новых версий в фоне. Установка после подтверждения Android."
+  "sha256": "046d220a13c3faffbff3c348cf6146fa894fc67ae070f060b15e7d5a1d21e41b",
+  "notes": "Подработка рядом с дополнительной сменой. Отметка руководителя «Записан» для обоих видов записей."
 }
