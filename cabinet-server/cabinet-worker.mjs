@@ -102,7 +102,7 @@ const memberFields={
  'profile':{key:/^[a-f0-9]{16}$/},
  'photo':{key:/^[a-f0-9]{16}$/},
  'like':{key:/^[a-f0-9]{16}$/,liked:/^[01]$/},
- 'save':{about:/^[^\x00-\x08\x0b\x0c\x0e-\x1f]{0,300}$/,position:/^[^\x00-\x08\x0b\x0c\x0e-\x1f]{0,80}$/,photo_action:/^(keep|replace|remove)$/,photo:/^[A-Za-z0-9+/=]{0,220000}$/}
+ 'save':{about:/^[^\x00-\x08\x0b\x0c\x0e-\x1f]{0,300}$/,position:/^[^\x00-\x08\x0b\x0c\x0e-\x1f]{0,80}$/,photo_action:/^(keep|replace|remove)$/,photo:/^[A-Za-z0-9+/=]{0,220000}$/,help:/^[^\x00-\x08\x0b\x0c\x0e-\x1f]{0,200}$/,hobbies:/^[^\x00-\x08\x0b\x0c\x0e-\x1f]{0,200}$/,extended:/^1?$/}
 };
 for(const [key,fields]of Object.entries(memberFields))workspaceRoutes[key==='members'?'/api/members':'/api/members/'+key]=[key==='members'?'members':key==='profile'?'member':'member-'+key,fields];
 
@@ -185,7 +185,7 @@ export default {async fetch(request,env){const u=new URL(request.url); if(u.path
       if([403,409,422].includes(r.status))throw new Denied(data.error||'Этот запрос недоступен',r.status);
       if(!r.ok||data.source!=='employee-cabinet-local'||data.telegram_id!==t.uid||String(data.employee_id)!==String(t.employee_id))throw new Denied('Не удалось получить данные сотрудника',503);
       if(path==='cabinet/hub')data=privateHub(data,t);
-      if(path==='cabinet/member')data={source:data.source,telegram_id:data.telegram_id,employee_id:data.employee_id,profile:pick(data.profile,['key','name','self','about','position','has_photo','photo_version','likes','liked']),updated_at:data.updated_at};
+      if(path==='cabinet/member')data={source:data.source,telegram_id:data.telegram_id,employee_id:data.employee_id,profile:{...pick(data.profile,['key','name','self','about','position','help','hobbies','has_photo','photo_version','likes','liked']),liked_by:(Array.isArray(data.profile?.liked_by)?data.profile.liked_by:[]).slice(0,200).map(x=>pick(x,['key','name','position','has_photo','photo_version']))},updated_at:data.updated_at};
       return json(data);
     }
     if(u.pathname==='/api/history'){if(b.cursor!=null && (typeof b.cursor!=='string'||b.cursor.length>1024))throw new Denied('Некорректная страница истории',422);return json(journal(await upstream('employees/'+t.employee_id+'/attestations',env,{limit:100,cursor:b.cursor}),t.employee_id));}
