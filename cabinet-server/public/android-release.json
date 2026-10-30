@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "package": "ru.cplink.lk",
-  "version_code": 12,
-  "version_name": "2.1.7",
+  "version_code": 13,
+  "version_name": "2.1.8",
   "min_sdk": 24,
-  "url": "https://cplink-lk.ru/downloads/cplink-lk-2.1.7.apk",
+  "url": "https://cplink-lk.ru/downloads/cplink-lk-2.1.8.apk",
   "bytes": 6712228,
-  "sha256": "463ccfe117b4a3e0f2ec09005a2229a89dacae88032ec2f0ffc9a75f3a081ab0",
-  "notes": "Новый расчётный листок: сумма к выплате сверху, дни одной строкой. В профиле видно, кто его отметил, и новые поля «Чем могу помочь» и «Увлечения». Кнопки стали спокойнее."
+  "sha256": "d4e75940c8aa10859ba241ee8e7bbb22f11223148f99d1d86dc08c8725e186a6",
+  "notes": "Сегодняшние баллы автоматически появляются после фонового расчёта. Исправлена повторная загрузка на главной, в смене и в разделе «Баллы»."
 }

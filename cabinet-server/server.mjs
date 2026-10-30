@@ -34,7 +34,8 @@ const androidFiles=new Map([
  ['/downloads/cplink-lk-2.1.4.apk',{file:'cplink-lk-2.1.4.apk',type:'application/vnd.android.package-archive',cache:'public, max-age=31536000, immutable'}],
  ['/downloads/cplink-lk-2.1.5.apk',{file:'cplink-lk-2.1.5.apk',type:'application/vnd.android.package-archive',cache:'public, max-age=31536000, immutable'}],
  ['/downloads/cplink-lk-2.1.7.apk',{file:'cplink-lk-2.1.7.apk',type:'application/vnd.android.package-archive',cache:'public, max-age=31536000, immutable'}],
- ['/downloads/cplink-lk.apk',{file:'cplink-lk-2.1.7.apk',type:'application/vnd.android.package-archive',cache:'no-cache'}]
+ ['/downloads/cplink-lk-2.1.8.apk',{file:'cplink-lk-2.1.8.apk',type:'application/vnd.android.package-archive',cache:'public, max-age=31536000, immutable'}],
+ ['/downloads/cplink-lk.apk',{file:'cplink-lk-2.1.8.apk',type:'application/vnd.android.package-archive',cache:'no-cache'}]
 ]);
 const androidFileCache=new Map();
 const allowed=new Set(['/','/health','/ready','/api/weather','/api/cabinet','/api/history','/api/score','/api/score/calendar','/api/orders','/api/order','/api/session','/api/login','/api/logout','/auth/start','/auth/callback','/api/notifications','/api/notifications/read','/api/scan','/api/operation/prepare','/api/operation/confirm','/api/operation/status','/api/workbench','/api/activity','/api/payroll','/api/requests','/api/requests/create','/api/requests/review','/api/requests/photo','/api/login/start','/api/login/status']);
