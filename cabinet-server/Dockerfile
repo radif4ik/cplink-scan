@@ -1,6 +1,6 @@
 FROM node:24-alpine
 WORKDIR /app
-COPY --chown=node:node server.mjs cabinet-worker.mjs bridge.mjs browser-auth.mjs ./
+COPY --chown=node:node server.mjs cabinet-worker.mjs bridge.mjs browser-auth.mjs shtab-relay.mjs ./
 COPY --chown=node:node public/ ./public/
 USER node
 ENV NODE_ENV=production PORT=8080

@@ -7,6 +7,7 @@ import {brotliCompressSync,gzipSync,constants as zlibConstants} from 'node:zlib'
 import worker from './cabinet-worker.mjs';
 import {createBridge,createAttendanceAPI} from './bridge.mjs';
 import {createBrowserAuth} from './browser-auth.mjs';
+import {createShtabRelay} from './shtab-relay.mjs';
 
 const port=Number(process.env.PORT||8080);
 if(!Number.isInteger(port)||port<1024||port>65535)throw Error('Invalid port');
@@ -52,6 +53,8 @@ allowed.add('/api/knowledge/session');allowed.add('/api/knowledge/media');
 const bridge=process.env.PRODUCTION_SOURCE==='local-bridge'?createBridge(env.CABINET_SIGNING_KEY):null;
 if(bridge)env.PRODUCTION_FETCH=bridge.source;
 const attendanceAPI=createAttendanceAPI(env.CABINET_SIGNING_KEY,bridge?.source,process.env.ATTENDANCE_INTEGRATION_TOKEN);
+// Штаб производства для руководителей: /shtab/* пересылается на ПК цеха отдельным мостом.
+const shtabRelay=createShtabRelay(env.CABINET_SIGNING_KEY);
 const browserAuth=createBrowserAuth(env.CABINET_SIGNING_KEY,process.env.TG_LOGIN_SECRET,process.env.TG_LOGIN_BOT_USERNAME||'postprocess_bot');
 // Вход через приложение Telegram: виджет живёт на oauth.telegram.org, а с
 // мобильного интернета этот домен молча недоступен. Код живёт 5 минут, привязан
@@ -71,6 +74,7 @@ const passwordTraffic=new Map();
 const server=http.createServer(async(req,res)=>{
   try{
     if(await attendanceAPI(req,res))return;
+    if(await shtabRelay(req,res))return;
     if(req.url==='/internal/bridge/poll'||req.url==='/internal/bridge/result'||req.url==='/internal/bridge/login'){
       res.setHeader('Cache-Control','no-store');
       if(!bridge||req.method!=='POST'||!bridge.authorized(req.headers.authorization)){res.writeHead(401);res.end();return}
