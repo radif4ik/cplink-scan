@@ -4,6 +4,7 @@
 !cabinet-worker.mjs
 !bridge.mjs
 !browser-auth.mjs
+!shtab-relay.mjs
 
 !public/
 !public/assetlinks.json
