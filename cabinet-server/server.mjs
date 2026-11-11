@@ -3,7 +3,7 @@ import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import http from 'node:http';
 import {randomBytes,createHash} from 'node:crypto';
-import {brotliCompressSync,gzipSync,constants as zlibConstants} from 'node:zlib';
+import {brotliCompressSync,gzipSync,gunzipSync,constants as zlibConstants} from 'node:zlib';
 import worker from './cabinet-worker.mjs';
 import {createBridge,createAttendanceAPI} from './bridge.mjs';
 import {createBrowserAuth} from './browser-auth.mjs';
@@ -80,7 +80,10 @@ const server=http.createServer(async(req,res)=>{
       if(!bridge||req.method!=='POST'||!bridge.authorized(req.headers.authorization)){res.writeHead(401);res.end();return}
       let size=0;const chunks=[];
       for await(const chunk of req){size+=chunk.length;if(size>2000000){res.writeHead(413);res.end();return}chunks.push(chunk)}
-      const value=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      // ПК сжимает большие ответы (раздел «Новости» — до 210 КБ JSON); распакованный — не больше 8 МБ.
+      let raw=Buffer.concat(chunks);
+      if(req.headers['content-encoding']==='gzip')raw=gunzipSync(raw,{maxOutputLength:8000000});
+      const value=JSON.parse(raw.toString('utf8'));
       if(req.url==='/internal/bridge/login'){
         sweepLogins();
         const code=String(value?.code||''),uid=Number(value?.telegram_id),login=pendingLogins.get(code);
