@@ -1,6 +1,8 @@
 import {createHmac, timingSafeEqual, randomUUID} from 'node:crypto';
 
-export function createBridge(signingKey,{timeoutMs=30000,maxPending=30,pollMs=15000}={}) {
+// gatherMs: экран кабинета шлёт 5–8 запросов почти разом; опрос ждёт их 40 мс и отдаёт пачкой
+// (до batch), а не первый запрос отдельно, а остальные следующими опросами (11.11.2026).
+export function createBridge(signingKey,{timeoutMs=30000,maxPending=30,pollMs=15000,gatherMs=40,batch=8}={}) {
   const token=createHmac('sha256',Buffer.from(signingKey,'hex')).update('employee-cabinet-bridge-v1').digest('hex');
   const pending=new Map();
   let wake;
@@ -24,8 +26,9 @@ export function createBridge(signingKey,{timeoutMs=30000,maxPending=30,pollMs=15
   async function poll() {
     if(![...pending.values()].some(x=>!x.sent)) {
       await new Promise(resolve=>{const timer=setTimeout(done,pollMs);function done(){clearTimeout(timer);if(wake===done)wake=null;resolve()}wake=done});
+      if([...pending.values()].some(x=>!x.sent)&&gatherMs>0)await new Promise(resolve=>setTimeout(resolve,gatherMs));
     }
-    return [...pending.values()].filter(x=>!x.sent).slice(0,4).map(x=>{x.sent=true;return {id:x.id,path:x.path,params:x.params}});
+    return [...pending.values()].filter(x=>!x.sent).slice(0,batch).map(x=>{x.sent=true;return {id:x.id,path:x.path,params:x.params}});
   }
   function complete(value) {
     const job=pending.get(value?.id);
